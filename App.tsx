@@ -25,7 +25,8 @@ import {
   CheckCircle,
   AlertCircle,
   Cloud,
-  Loader2
+  Loader2,
+  ShieldAlert
 } from 'lucide-react';
 import { Part, DEFAULT_CATEGORIES, CartItem } from './types';
 import { generatePartDescription } from './services/geminiService';
@@ -75,6 +76,61 @@ const loadCartFromStorage = (): CartItem[] => {
 };
 
 // --- Components ---
+
+const PermissionErrorModal = ({ isOpen }: { isOpen: boolean }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fadeIn">
+      <div className="bg-[#1e293b] rounded-2xl w-full max-w-xl p-6 border-2 border-red-500/50 shadow-2xl flex flex-col items-center text-center">
+        <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-4">
+          <ShieldAlert className="w-8 h-8 text-red-500" />
+        </div>
+        
+        <h2 className="text-2xl font-bold text-white mb-2">資料庫權限不足</h2>
+        <h3 className="text-lg text-red-400 mb-6 font-mono">FirebaseError: permission-denied</h3>
+        
+        <div className="text-slate-300 text-left w-full space-y-4 mb-6 text-sm">
+          <p>
+            您的網站目前無法讀取 Firebase 資料庫。這是因為新建立的 Firebase 專案預設規則是鎖定的。
+          </p>
+          <div className="bg-slate-900 p-4 rounded-lg border border-slate-700">
+            <p className="font-bold text-white mb-2">請依照以下步驟修復：</p>
+            <ol className="list-decimal pl-5 space-y-1 text-slate-400">
+              <li>前往 <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">Firebase Console</a></li>
+              <li>進入專案 <strong>Firestore Database</strong> 分頁</li>
+              <li>點選上方的 <strong>Rules (規則)</strong> 標籤</li>
+              <li>將規則修改為允許讀寫 (測試用)：</li>
+            </ol>
+          </div>
+          
+          <div className="relative group">
+            <pre className="bg-black/50 p-4 rounded-lg border border-slate-700 font-mono text-xs text-emerald-400 overflow-x-auto">
+{`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}`}
+            </pre>
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            注意：這會將資料庫設為公開。正式營運時建議設定更嚴格的權限。
+          </p>
+        </div>
+
+        <button 
+          onClick={() => window.location.reload()}
+          className="px-8 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-red-500/20 w-full sm:w-auto"
+        >
+          我已經修改規則了，重新整理
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const SimpleRenameModal = ({
     isOpen,
@@ -695,6 +751,9 @@ export default function App() {
   const [currentPart, setCurrentPart] = useState<Partial<Part> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Error State for Firebase Permissions
+  const [permissionError, setPermissionError] = useState(false);
+
   // --- Firestore Real-time Listeners ---
 
   // 1. Listen for Inventory Changes
@@ -709,6 +768,10 @@ export default function App() {
     }, (error) => {
       console.error("Error fetching parts:", error);
       setIsLoading(false);
+      // @ts-ignore
+      if (error.code === 'permission-denied') {
+        setPermissionError(true);
+      }
     });
 
     return () => unsubscribe();
@@ -726,6 +789,12 @@ export default function App() {
       } else {
         // Initialize default categories if not exists
         setDoc(doc(db, 'settings', 'general'), { categories: DEFAULT_CATEGORIES });
+      }
+    }, (error) => {
+      console.error("Error fetching categories:", error);
+      // @ts-ignore
+      if (error.code === 'permission-denied') {
+        setPermissionError(true);
       }
     });
 
@@ -1010,6 +1079,8 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-100 font-sans pb-20">
       
+      <PermissionErrorModal isOpen={permissionError} />
+
       <CartDrawer 
         isOpen={isCartOpen} 
         onClose={() => setIsCartOpen(false)}
