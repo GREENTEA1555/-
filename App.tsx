@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   Search, 
@@ -30,7 +29,7 @@ import {
 import { Part, DEFAULT_CATEGORIES, CartItem } from './types';
 import { generatePartDescription } from './services/geminiService';
 
-// --- Mock Data (Fallback if storage is empty) ---
+// --- Mock Data ---
 const INITIAL_INVENTORY: Part[] = [
   {
     id: '1',
@@ -130,7 +129,6 @@ const loadFromStorage = <T,>(key: string, defaultValue: T): T => {
 
 // --- Components ---
 
-// Simple Rename Modal
 const SimpleRenameModal = ({
     isOpen,
     onClose,
@@ -174,7 +172,6 @@ const SimpleRenameModal = ({
     );
 };
 
-// Subcategory Manager Component (For Edit Modal)
 const SubcategoryManager = ({
     isOpen,
     onClose,
@@ -282,7 +279,6 @@ const SubcategoryManager = ({
     );
   };
 
-// Category Manager Component
 const CategoryManager = ({
   isOpen,
   onClose,
@@ -410,7 +406,7 @@ const CategoryManager = ({
   );
 };
 
-// Price List View Component
+// --- Price List View Component (Updated with Add Button) ---
 const PriceListView = ({ 
   parts, 
   categories, 
@@ -418,7 +414,8 @@ const PriceListView = ({
   onCategoryChange,
   onAddToCart,
   isAdmin,
-  onEdit
+  onEdit,
+  onAdd // New Prop
 }: { 
   parts: Part[], 
   categories: string[],
@@ -426,9 +423,9 @@ const PriceListView = ({
   onCategoryChange: (cat: string | 'ALL') => void,
   onAddToCart: (part: Part) => void,
   isAdmin: boolean,
-  onEdit: (part: Part) => void
+  onEdit: (part: Part) => void,
+  onAdd: () => void
 }) => {
-  // Filter parts internally for the table view based on the active category props
   const filteredParts = activeCategory === 'ALL' 
     ? parts 
     : parts.filter(p => p.category === activeCategory);
@@ -436,17 +433,29 @@ const PriceListView = ({
   return (
     <div className="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden shadow-xl animate-fadeIn flex flex-col h-full">
       <div className="p-6 bg-slate-800 border-b border-slate-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-           <h2 className="text-xl font-bold flex items-center gap-2 text-white">
-            <FileText className="w-5 h-5 text-emerald-400" />
-            {activeCategory === 'ALL' ? '綜合報價單 (總覽)' : `${activeCategory} 報價單`}
-          </h2>
-          <span className="text-sm text-slate-400 mt-1 block">
-             共 {filteredParts.length} 項商品
-          </span>
+        <div className="flex items-center gap-4">
+          <div>
+            <h2 className="text-xl font-bold flex items-center gap-2 text-white">
+              <FileText className="w-5 h-5 text-emerald-400" />
+              {activeCategory === 'ALL' ? '綜合報價單 (總覽)' : `${activeCategory} 報價單`}
+            </h2>
+            <span className="text-sm text-slate-400 mt-1 block">
+              共 {filteredParts.length} 項商品
+            </span>
+          </div>
+          
+          {/* Add Button for List View */}
+          {isAdmin && (
+            <button
+                onClick={onAdd}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-emerald-500/20 transition-all hover:scale-105"
+            >
+                <Plus className="w-4 h-4" />
+                新增零件
+            </button>
+          )}
         </div>
         
-        {/* Internal Category Filter for List View */}
         <div className="flex gap-1 bg-slate-900/50 p-1 rounded-lg overflow-x-auto max-w-full">
              <button
                 onClick={() => onCategoryChange('ALL')}
@@ -653,7 +662,6 @@ const CartDrawer = ({
   );
 };
 
-// --- Checkout Modal ---
 const CheckoutModal = ({
     isOpen,
     onClose,
@@ -716,7 +724,6 @@ const CheckoutModal = ({
 // --- Main App ---
 
 export default function App() {
-  // Initialize state from LocalStorage (with fallback to mock data)
   const [inventory, setInventory] = useState<Part[]>(() => 
     loadFromStorage(STORAGE_KEYS.INVENTORY, INITIAL_INVENTORY)
   );
@@ -730,27 +737,22 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Navigation State
   const [activeCategory, setActiveCategory] = useState<string | 'ALL'>('ALL');
   const [activeSubcategory, setActiveSubcategory] = useState<string | null>(null);
   
-  // View Mode: 'GRID' (Default) or 'LIST' (Price List)
   const [viewMode, setViewMode] = useState<'GRID' | 'LIST'>('GRID');
   
-  // UI State
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
   const [isSubcategoryManagerOpen, setIsSubcategoryManagerOpen] = useState(false);
-  const [renameTarget, setRenameTarget] = useState<string | null>(null); // For simple rename modal
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
   
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentPart, setCurrentPart] = useState<Partial<Part> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- Persistence Effects ---
-  // Whenever inventory, categories, or cart changes, save to localStorage
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(inventory));
   }, [inventory]);
@@ -764,11 +766,8 @@ export default function App() {
   }, [cart]);
 
 
-  // --- Derived Data ---
-
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + (item.price * item.quantity), 0), [cart]);
 
-  // 1. Get all unique subcategories for the current active category
   const availableSubcategories = useMemo(() => {
     if (activeCategory === 'ALL') return [];
     const subcats = new Set(
@@ -779,7 +778,6 @@ export default function App() {
     return Array.from(subcats);
   }, [inventory, activeCategory]);
 
-  // 2. Filter parts based on hierarchy (For Grid View specifically)
   const displayedParts = useMemo(() => {
     return inventory.filter(part => {
       const matchesSearch = part.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -793,7 +791,6 @@ export default function App() {
     });
   }, [inventory, searchQuery, activeCategory, activeSubcategory]);
 
-  // Subcategories specifically for the modal's current category
   const modalSubcategories = useMemo(() => {
     if (!currentPart?.category) return [];
     const subcats = new Set(
@@ -806,13 +803,10 @@ export default function App() {
 
   const getCategoryCount = (name: string) => inventory.filter(p => p.category === name).length;
   const getSubcategoryCount = (sub: string) => {
-      // Determine context: either modal editing currentPart, or browsing activeCategory
       const cat = currentPart?.category || (activeCategory !== 'ALL' ? activeCategory : null);
       if(!cat) return 0;
       return inventory.filter(p => p.subcategory === sub && p.category === cat).length;
   };
-
-  // --- Handlers ---
 
   const handleCategoryChange = (cat: string | 'ALL') => {
     setActiveCategory(cat);
@@ -832,42 +826,25 @@ export default function App() {
 
   const handleRenameCategory = (oldName: string, newName: string) => {
     if (!newName.trim() || categories.includes(newName)) return;
-    
     setCategories(prev => prev.map(c => c === oldName ? newName : c));
-    
-    // Update all parts
     setInventory(prev => prev.map(part => {
-      if (part.category === oldName) {
-        return { ...part, category: newName };
-      }
+      if (part.category === oldName) return { ...part, category: newName };
       return part;
     }));
-    
-    // Update active category
-    if (activeCategory === oldName) {
-      setActiveCategory(newName);
-    }
-    
-    // Update cart items
+    if (activeCategory === oldName) setActiveCategory(newName);
     setCart(prev => prev.map(item => {
-        if (item.category === oldName) {
-            return { ...item, category: newName };
-        }
+        if (item.category === oldName) return { ...item, category: newName };
         return item;
     }));
   };
 
   const handleDeleteCategory = (catName: string) => {
     const partsCount = getCategoryCount(catName);
-    
     if (window.confirm(`確定要刪除「${catName}」分類嗎？\n將會一併刪除該分類下的 ${partsCount} 個商品。`)) {
       setCategories(prev => prev.filter(c => c !== catName));
       setInventory(prev => prev.filter(p => p.category !== catName));
       setCart(prev => prev.filter(item => item.category !== catName));
-      
-      if (activeCategory === catName) {
-        setActiveCategory('ALL');
-      }
+      if (activeCategory === catName) setActiveCategory('ALL');
     }
   };
 
@@ -936,12 +913,10 @@ export default function App() {
   const handleDelete = (id: string) => {
     if (window.confirm('確定要刪除這個項目嗎?')) {
       setInventory(prev => prev.filter(p => p.id !== id));
-      // Also remove from cart if present
       setCart(prev => prev.filter(item => item.id !== id));
     }
   };
 
-  // --- Cart Handlers ---
   const addToCart = (part: Part) => {
     if (!part.inStock) return;
     setCart(prev => {
@@ -1033,7 +1008,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-100 font-sans pb-20">
       
-      {/* --- Cart Drawer --- */}
       <CartDrawer 
         isOpen={isCartOpen} 
         onClose={() => setIsCartOpen(false)}
@@ -1043,7 +1017,6 @@ export default function App() {
         onCheckout={handleCheckout}
       />
 
-      {/* --- Checkout Modal --- */}
       <CheckoutModal 
         isOpen={isCheckoutOpen}
         onClose={() => setIsCheckoutOpen(false)}
@@ -1051,7 +1024,6 @@ export default function App() {
         totalAmount={cartTotal}
       />
 
-      {/* --- Category Manager --- */}
       <CategoryManager 
         isOpen={isCategoryManagerOpen}
         onClose={() => setIsCategoryManagerOpen(false)}
@@ -1062,7 +1034,6 @@ export default function App() {
         getCategoryCount={getCategoryCount}
       />
 
-      {/* --- Subcategory Manager (In Edit Modal) --- */}
       <SubcategoryManager 
         isOpen={isSubcategoryManagerOpen}
         onClose={() => setIsSubcategoryManagerOpen(false)}
@@ -1073,7 +1044,6 @@ export default function App() {
         getPartCount={getSubcategoryCount}
       />
 
-      {/* --- Simple Rename Modal (Quick Edit) --- */}
       <SimpleRenameModal
         isOpen={!!renameTarget}
         title="重新命名分類"
@@ -1107,7 +1077,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Main Category Tabs (Desktop) */}
+            {/* Main Category Tabs */}
             <div className="hidden lg:flex gap-1 overflow-x-auto max-w-3xl custom-scrollbar pb-1">
               <button
                  onClick={handlePriceListClick}
@@ -1149,9 +1119,8 @@ export default function App() {
               )}
             </div>
 
-            {/* Right Side: Cart & Admin Toggle */}
+            {/* Right Side */}
             <div className="flex items-center gap-3 shrink-0">
-               {/* Cart Button */}
                <button 
                   onClick={() => setIsCartOpen(true)}
                   className="relative p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors border border-slate-700 mr-2"
@@ -1185,10 +1154,7 @@ export default function App() {
          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
             <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
                 
-                {/* Left: Breadcrumbs & Mode Toggle */}
                 <div className="flex items-center gap-4 w-full md:w-auto">
-                    
-                    {/* View Mode Toggle */}
                     <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700 shrink-0">
                         <button
                             onClick={() => setViewMode('GRID')}
@@ -1208,7 +1174,6 @@ export default function App() {
 
                     <div className="h-4 w-px bg-slate-700"></div>
 
-                    {/* Breadcrumbs */}
                     <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide">
                         <button 
                             onClick={() => { handleCategoryChange('ALL'); }}
@@ -1241,7 +1206,6 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* Search */}
                 <div className="relative w-full md:w-80 group">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <Search className="h-5 w-5 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
@@ -1256,7 +1220,6 @@ export default function App() {
                 </div>
             </div>
             
-            {/* Mobile Category Scroll */}
             <div className="lg:hidden flex gap-2 mt-4 overflow-x-auto pb-2 scrollbar-hide">
                  <button
                     onClick={handlePriceListClick}
@@ -1284,7 +1247,7 @@ export default function App() {
       {/* --- Main Content Area --- */}
       <main className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Admin Actions */}
+        {/* Admin Actions (Visible in Grid Mode, now redundant in List mode but kept for consistency) */}
         {isAdmin && (
             <div className="mb-6 bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
@@ -1325,11 +1288,11 @@ export default function App() {
                 onAddToCart={addToCart}
                 isAdmin={isAdmin}
                 onEdit={handleEdit}
+                onAdd={handleCreate} // Pass the create handler
             />
         ) : (
             // --- VIEW MODE: GRID ---
             <>
-                {/* 1. Category Selection (If ALL) */}
                 {activeCategory === 'ALL' && !searchQuery && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                         {categories.map(cat => (
@@ -1353,7 +1316,6 @@ export default function App() {
                     </div>
                 )}
 
-                {/* 2. Subcategory List (Drill Down) */}
                 {activeCategory !== 'ALL' && !activeSubcategory && !searchQuery && (
                     <div>
                         <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
@@ -1367,7 +1329,6 @@ export default function App() {
                                     onClick={() => setActiveSubcategory(subcat)}
                                     className="relative bg-slate-800/50 hover:bg-slate-700 cursor-pointer p-4 rounded-xl border border-slate-700 hover:border-blue-400 transition-all flex flex-col items-center text-center gap-3 group"
                                 >
-                                    {/* Admin Actions on Card */}
                                     {isAdmin && (
                                         <div className="absolute top-2 right-2 flex gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                                              <button 
@@ -1410,7 +1371,6 @@ export default function App() {
                                 </div>
                             )}
                             
-                            {/* Fast Add Button for Admin */}
                             {isAdmin && (
                                 <div 
                                     onClick={handleCreate}
@@ -1426,10 +1386,8 @@ export default function App() {
                     </div>
                 )}
 
-                {/* 3. Part Grid (Result) */}
                 {(activeSubcategory || searchQuery) && (
                     <div className="animate-fadeIn">
-                        {/* Header for list */}
                         {!searchQuery && (
                             <div className="flex items-center gap-4 mb-6">
                                 <button 
@@ -1455,14 +1413,12 @@ export default function App() {
                                 <p className="text-slate-500 mt-2">嘗試搜尋其他關鍵字或返回上頁</p>
                             </div>
                         ) : (
-                            // High density grid: up to 6 columns on XL screens to show ~20 items
                             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                                 {displayedParts.map((part) => (
                                 <div 
                                     key={part.id} 
                                     className="group relative bg-slate-800/50 rounded-xl overflow-hidden border border-slate-700/50 hover:border-slate-600 hover:shadow-2xl hover:shadow-blue-900/10 transition-all duration-300 flex flex-col h-full"
                                 >
-                                    {/* Image Section */}
                                     <div className="relative aspect-square overflow-hidden bg-slate-900">
                                         <img
                                             src={part.imageUrl}
@@ -1475,7 +1431,6 @@ export default function App() {
                                             </span>
                                         </div>
 
-                                        {/* Quick Edit Button (Always visible for admins) */}
                                         {isAdmin && (
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); handleEdit(part); }}
@@ -1494,7 +1449,6 @@ export default function App() {
                                             </div>
                                         )}
                                         
-                                        {/* Overlay Actions (Delete Only now, since edit is persistent) */}
                                         {isAdmin && (
                                             <div className="absolute bottom-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <button
@@ -1508,7 +1462,6 @@ export default function App() {
                                         )}
                                     </div>
 
-                                    {/* Content Section - Compact for density */}
                                     <div className="p-3 flex flex-col flex-grow">
                                         <div className="flex-grow">
                                             <div className="text-[10px] text-blue-400 mb-1 font-medium truncate">
@@ -1524,7 +1477,6 @@ export default function App() {
                                                 {formatCurrency(part.price)}
                                             </span>
                                             
-                                            {/* Add to Cart Button */}
                                             <button 
                                                 onClick={(e) => { e.stopPropagation(); addToCart(part); }}
                                                 disabled={!part.inStock}
@@ -1549,7 +1501,7 @@ export default function App() {
         )}
       </main>
 
-      {/* --- Edit/Create Modal (The "Backend") --- */}
+      {/* --- Edit/Create Modal --- */}
       {isModalOpen && currentPart && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="bg-[#1e293b] rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-700 animate-fadeIn flex flex-col">
@@ -1572,7 +1524,6 @@ export default function App() {
 
               <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
                 
-                {/* Product Basic Info */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-slate-400">商品名稱 (Name)</label>
@@ -1601,7 +1552,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Categorization */}
                 <div className="bg-slate-800/30 p-4 rounded-xl border border-slate-700/50 space-y-4">
                     <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2">
                         <FolderOpen className="w-4 h-4" /> 分類設定
@@ -1620,9 +1570,10 @@ export default function App() {
                             </select>
                         </div>
 
+                        {/* Updated Subcategory Selection UI */}
                         <div className="space-y-2">
                             <label className="text-xs text-slate-500 flex justify-between items-center">
-                                零件分類 (可輸入新分類)
+                                零件分類 (點選或輸入)
                                 <button
                                     type="button"
                                     onClick={() => setIsSubcategoryManagerOpen(true)}
@@ -1631,25 +1582,39 @@ export default function App() {
                                     [管理分類]
                                 </button>
                             </label>
-                            <div className="flex gap-2">
-                                <input
-                                    list="subcategory-list"
-                                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none placeholder-slate-600"
-                                    value={currentPart.subcategory || ''}
-                                    onChange={e => setCurrentPart({ ...currentPart, subcategory: e.target.value })}
-                                    placeholder="例如: 蘑菇頭, 電源板..."
-                                />
-                                <datalist id="subcategory-list">
-                                    {modalSubcategories.map(sub => (
-                                        <option key={sub} value={sub} />
-                                    ))}
-                                </datalist>
+                            
+                            {/* Chips Selection Area */}
+                            <div className="flex flex-wrap gap-2 p-3 bg-slate-900/50 rounded-lg border border-slate-700 max-h-32 overflow-y-auto custom-scrollbar">
+                                {modalSubcategories.length > 0 ? modalSubcategories.map(sub => (
+                                    <button
+                                        type="button"
+                                        key={sub}
+                                        onClick={() => setCurrentPart({ ...currentPart, subcategory: sub })}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                                            currentPart.subcategory === sub
+                                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/50'
+                                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700 border border-slate-600 hover:border-slate-500'
+                                        }`}
+                                    >
+                                        {sub}
+                                    </button>
+                                )) : (
+                                    <span className="text-xs text-slate-600 italic">尚無可選分類，請直接輸入</span>
+                                )}
                             </div>
+
+                            {/* Manual Input Fallback */}
+                            <input
+                                type="text"
+                                className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none placeholder-slate-600 text-sm"
+                                value={currentPart.subcategory || ''}
+                                onChange={e => setCurrentPart({ ...currentPart, subcategory: e.target.value })}
+                                placeholder="或是手動輸入新分類..."
+                            />
                         </div>
                     </div>
                 </div>
 
-                {/* Status */}
                 <div className="space-y-2">
                     <label className="text-sm font-medium text-slate-400">庫存狀態</label>
                     <label className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 cursor-pointer hover:bg-slate-800 transition-colors">
@@ -1665,7 +1630,6 @@ export default function App() {
                     </label>
                 </div>
 
-                {/* Description AI */}
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
                     <label className="text-sm font-medium text-slate-400">詳細說明</label>
@@ -1680,7 +1644,7 @@ export default function App() {
                       ) : (
                         <>
                           <Sparkles className="w-3 h-3" />
-                          AI 自動撰寫
+                          AI 自動撰寫 (繁中)
                         </>
                       )}
                     </button>
@@ -1693,11 +1657,9 @@ export default function App() {
                   />
                 </div>
 
-                {/* Image */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-400">商品圖片</label>
                   
-                  {/* File Upload Button */}
                   <div className="flex gap-2 mb-2">
                     <button
                       type="button"
@@ -1715,7 +1677,6 @@ export default function App() {
                     />
                   </div>
 
-                  {/* URL Fallback */}
                   <input
                     type="text"
                     className="w-full bg-slate-800/50 border border-slate-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-xs text-slate-500"
@@ -1757,7 +1718,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Footer */}
       <footer className="border-t border-slate-800 bg-[#0f172a] py-8 mt-auto">
         <div className="max-w-7xl mx-auto px-6 text-center text-slate-500 text-sm">
           <p>© 2024 GamePart Hub. All rights reserved.</p>
