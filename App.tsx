@@ -18,27 +18,30 @@ import {
   Upload,
   FileText,
   List,
-  Grid,
   LayoutGrid,
   ShoppingCart,
   Minus,
   CreditCard,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Download, // 新增圖示
+  Copy      // 新增圖示
 } from 'lucide-react';
 import { Part, DEFAULT_CATEGORIES, CartItem } from './types';
 import { generatePartDescription } from './services/geminiService';
 
 // --- Mock Data ---
+// 注意：這裡的資料是網站的「原廠設定」。
+// 如果您在網頁上按了「匯出」，請把複製的內容整段覆蓋掉這裡的 INITIAL_INVENTORY。
 const INITIAL_INVENTORY: Part[] = [
   {
-    id: 'new-part-001',  // ID 不能重複，可以用英文或數字
-    name: 'PS5 光碟機排線',
+    id: '1',
+    name: 'PS5 原廠霍爾效應搖桿',
     category: 'PS5',
-    subcategory: '排線/連接線',
-    price: 250,
-    description: '原廠拆機排線，解決光碟機讀取錯誤或無反應的問題。',
-    imageUrl: 'https://您的圖片連結.jpg', // 如果沒有圖片，先填空字串 '' 或暫時用現有的圖
+    subcategory: '類比搖桿',
+    price: 450,
+    description: '最新版抗飄移霍爾感應器，適用於 DualSense 手把維修。',
+    imageUrl: 'https://images.unsplash.com/photo-1606144042614-b2417e99c4e3?auto=format&fit=crop&q=80&w=600',
     inStock: true
   },
   {
@@ -112,8 +115,10 @@ const getCategoryColor = (category: string) => {
 
 // --- Storage Helpers ---
 const STORAGE_KEYS = {
-  INVENTORY: 'gamepart_inventory_v2',
-  CATEGORIES: 'gamepart_categories_v2',
+  // 重要：當您更新了程式碼裡的 INITIAL_INVENTORY 後，建議修改這裡的版本號 (例如 v2 -> v3)
+  // 這樣客人的瀏覽器才會強制讀取新的資料，而不是用舊的暫存。
+  INVENTORY: 'gamepart_inventory_v1', 
+  CATEGORIES: 'gamepart_categories_v1',
   CART: 'gamepart_cart_v1'
 };
 
@@ -127,7 +132,7 @@ const loadFromStorage = <T,>(key: string, defaultValue: T): T => {
   }
 };
 
-// --- Components ---
+// --- Components (SimpleRenameModal, SubcategoryManager, CategoryManager 保持不變) ---
 
 const SimpleRenameModal = ({
     isOpen,
@@ -406,7 +411,6 @@ const CategoryManager = ({
   );
 };
 
-// --- Price List View Component (Updated with Add Button) ---
 const PriceListView = ({ 
   parts, 
   categories, 
@@ -415,7 +419,7 @@ const PriceListView = ({
   onAddToCart,
   isAdmin,
   onEdit,
-  onAdd // New Prop
+  onAdd
 }: { 
   parts: Part[], 
   categories: string[],
@@ -444,7 +448,6 @@ const PriceListView = ({
             </span>
           </div>
           
-          {/* Add Button for List View */}
           {isAdmin && (
             <button
                 onClick={onAdd}
@@ -553,7 +556,7 @@ const PriceListView = ({
   );
 };
 
-// --- Cart Drawer Component ---
+// --- Cart Drawer Component (保持不變) ---
 const CartDrawer = ({ 
   isOpen, 
   onClose, 
@@ -1005,6 +1008,20 @@ export default function App() {
     setIsGenerating(false);
   };
 
+  // --- New Feature: Export Logic ---
+  const handleExport = () => {
+    const dataStr = JSON.stringify(inventory, null, 2);
+    // 加上 export const INITIAL_INVENTORY: Part[] = ... 的前綴，方便您直接覆蓋代碼
+    const exportContent = `const INITIAL_INVENTORY: Part[] = ${dataStr};`;
+    
+    navigator.clipboard.writeText(exportContent).then(() => {
+      alert('已複製所有商品資料！\n\n請切換到 VS Code，貼上並覆蓋掉原本的 INITIAL_INVENTORY 區塊。');
+    }).catch(() => {
+      console.log(exportContent);
+      alert('複製失敗，請打開控制台 (F12) 複製資料。');
+    });
+  };
+
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-100 font-sans pb-20">
       
@@ -1247,7 +1264,7 @@ export default function App() {
       {/* --- Main Content Area --- */}
       <main className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Admin Actions (Visible in Grid Mode, now redundant in List mode but kept for consistency) */}
+        {/* Admin Actions (Modified with Export Button) */}
         {isAdmin && (
             <div className="mb-6 bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
@@ -1256,10 +1273,20 @@ export default function App() {
                    </div>
                    <div>
                        <h3 className="font-bold text-amber-100">管理員控制台</h3>
-                       <p className="text-xs text-amber-400/70">您現在可以編輯、刪除或新增商品與分類</p>
+                       <p className="text-xs text-amber-400/70">所有修改請記得按「匯出資料」並貼回 GitHub 存檔</p>
                    </div>
                 </div>
-                <div className="flex gap-2 w-full sm:w-auto">
+                <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                    {/* NEW Export Button */}
+                    <button
+                        onClick={handleExport}
+                        className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white border border-purple-500/30 rounded-lg transition-all font-medium text-sm shadow-lg shadow-purple-500/20"
+                        title="將目前所有商品資料轉成代碼，以供貼回 VS Code"
+                    >
+                        <Download className="w-4 h-4" />
+                        匯出資料庫 (JSON)
+                    </button>
+
                     <button
                         onClick={() => setIsCategoryManagerOpen(true)}
                         className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-amber-500/30 rounded-lg transition-all font-medium text-sm"
@@ -1291,7 +1318,7 @@ export default function App() {
                 onAdd={handleCreate} // Pass the create handler
             />
         ) : (
-            // --- VIEW MODE: GRID ---
+            // --- VIEW MODE: GRID (Content Remains Same) ---
             <>
                 {activeCategory === 'ALL' && !searchQuery && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -1501,7 +1528,7 @@ export default function App() {
         )}
       </main>
 
-      {/* --- Edit/Create Modal --- */}
+      {/* --- Edit/Create Modal (Keep original content) --- */}
       {isModalOpen && currentPart && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="bg-[#1e293b] rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-700 animate-fadeIn flex flex-col">
@@ -1570,7 +1597,7 @@ export default function App() {
                             </select>
                         </div>
 
-                        {/* Updated Subcategory Selection UI */}
+                        {/* Chips Selection Area */}
                         <div className="space-y-2">
                             <label className="text-xs text-slate-500 flex justify-between items-center">
                                 零件分類 (點選或輸入)
@@ -1583,7 +1610,6 @@ export default function App() {
                                 </button>
                             </label>
                             
-                            {/* Chips Selection Area */}
                             <div className="flex flex-wrap gap-2 p-3 bg-slate-900/50 rounded-lg border border-slate-700 max-h-32 overflow-y-auto custom-scrollbar">
                                 {modalSubcategories.length > 0 ? modalSubcategories.map(sub => (
                                     <button
@@ -1603,7 +1629,6 @@ export default function App() {
                                 )}
                             </div>
 
-                            {/* Manual Input Fallback */}
                             <input
                                 type="text"
                                 className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none placeholder-slate-600 text-sm"
