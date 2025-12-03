@@ -24,77 +24,22 @@ import {
   CreditCard,
   CheckCircle,
   AlertCircle,
-  Download, // 新增圖示
-  Copy      // 新增圖示
+  Cloud,
+  Loader2
 } from 'lucide-react';
 import { Part, DEFAULT_CATEGORIES, CartItem } from './types';
 import { generatePartDescription } from './services/geminiService';
-
-// --- Mock Data ---
-// 注意：這裡的資料是網站的「原廠設定」。
-// 如果您在網頁上按了「匯出」，請把複製的內容整段覆蓋掉這裡的 INITIAL_INVENTORY。
-const INITIAL_INVENTORY: Part[] = [
-  {
-    id: '1',
-    name: 'PS5 原廠霍爾效應搖桿',
-    category: 'PS5',
-    subcategory: '類比搖桿',
-    price: 450,
-    description: '最新版抗飄移霍爾感應器，適用於 DualSense 手把維修。',
-    imageUrl: 'https://images.unsplash.com/photo-1606144042614-b2417e99c4e3?auto=format&fit=crop&q=80&w=600',
-    inStock: true
-  },
-  {
-    id: '2',
-    name: 'PS5 HDMI 2.1 接口',
-    category: 'PS5',
-    subcategory: '顯示接口',
-    price: 350,
-    description: '原廠規格 HDMI 插座，解決無畫面、接觸不良問題。',
-    imageUrl: 'https://images.unsplash.com/photo-1621259182978-fbf93132d53d?auto=format&fit=crop&q=80&w=600',
-    inStock: true
-  },
-  {
-    id: '3',
-    name: 'Switch Joy-Con 滑軌排線 (左)',
-    category: 'SWITCH',
-    subcategory: '排線/連接線',
-    price: 150,
-    description: '左手把專用滑軌總成，含配對燈號與 SL/SR 按鍵排線。',
-    imageUrl: 'https://images.unsplash.com/photo-1578303512597-81e6cc155b3e?auto=format&fit=crop&q=80&w=600',
-    inStock: true
-  },
-  {
-    id: '4',
-    name: 'Xbox Series X 靜音散熱風扇',
-    category: 'XBOX',
-    subcategory: '散熱系統',
-    price: 890,
-    description: '原廠拆機良品，解決主機過熱自動關機問題。',
-    imageUrl: 'https://images.unsplash.com/photo-1621259182906-5d9b7c4a1702?auto=format&fit=crop&q=80&w=600',
-    inStock: false
-  },
-  {
-    id: '5',
-    name: 'PS4 Pro 電源供應器 ADP-300CR',
-    category: 'PS4',
-    subcategory: '電源系統',
-    price: 1200,
-    description: 'PS4 Pro 7000型專用內置電源板，解決無法開機問題。',
-    imageUrl: 'https://images.unsplash.com/photo-1507457379470-08b800bebc67?auto=format&fit=crop&q=80&w=600',
-    inStock: true
-  },
-  {
-    id: '6',
-    name: 'PS5 蘑菇頭 (橡膠帽)',
-    category: 'PS5',
-    subcategory: '類比搖桿',
-    price: 50,
-    description: '高品質橡膠材質，手感接近原廠，更換磨損的搖桿帽。',
-    imageUrl: 'https://images.unsplash.com/photo-1592840496011-8b5204ab60ed?auto=format&fit=crop&q=80&w=600',
-    inStock: true
-  }
-];
+// 引入我們剛剛建立的連線設定
+import { db } from './firebaseConfig';
+import { 
+  collection, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  setDoc
+} from 'firebase/firestore';
 
 // --- Helpers ---
 const formatCurrency = (amount: number) => {
@@ -113,26 +58,23 @@ const getCategoryColor = (category: string) => {
   return 'text-purple-400 border-purple-400 bg-purple-500/10';
 };
 
-// --- Storage Helpers ---
+// --- LocalStorage for Cart ONLY ---
+// 購物車依然存在使用者自己的瀏覽器裡，不佔用雲端空間
 const STORAGE_KEYS = {
-  // 重要：當您更新了程式碼裡的 INITIAL_INVENTORY 後，建議修改這裡的版本號 (例如 v2 -> v3)
-  // 這樣客人的瀏覽器才會強制讀取新的資料，而不是用舊的暫存。
-  INVENTORY: 'gamepart_inventory_v1', 
-  CATEGORIES: 'gamepart_categories_v1',
   CART: 'gamepart_cart_v1'
 };
 
-const loadFromStorage = <T,>(key: string, defaultValue: T): T => {
+const loadCartFromStorage = (): CartItem[] => {
   try {
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : defaultValue;
+    const saved = localStorage.getItem(STORAGE_KEYS.CART);
+    return saved ? JSON.parse(saved) : [];
   } catch (error) {
-    console.error(`Error loading ${key} from storage:`, error);
-    return defaultValue;
+    console.error(`Error loading cart:`, error);
+    return [];
   }
 };
 
-// --- Components (SimpleRenameModal, SubcategoryManager, CategoryManager 保持不變) ---
+// --- Components ---
 
 const SimpleRenameModal = ({
     isOpen,
@@ -556,7 +498,7 @@ const PriceListView = ({
   );
 };
 
-// --- Cart Drawer Component (保持不變) ---
+// --- Cart Drawer Component ---
 const CartDrawer = ({ 
   isOpen, 
   onClose, 
@@ -727,15 +669,12 @@ const CheckoutModal = ({
 // --- Main App ---
 
 export default function App() {
-  const [inventory, setInventory] = useState<Part[]>(() => 
-    loadFromStorage(STORAGE_KEYS.INVENTORY, INITIAL_INVENTORY)
-  );
-  const [categories, setCategories] = useState<string[]>(() => 
-    loadFromStorage(STORAGE_KEYS.CATEGORIES, DEFAULT_CATEGORIES)
-  );
-  const [cart, setCart] = useState<CartItem[]>(() => 
-    loadFromStorage(STORAGE_KEYS.CART, [])
-  );
+  const [inventory, setInventory] = useState<Part[]>([]);
+  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Cart remains local
+  const [cart, setCart] = useState<CartItem[]>(() => loadCartFromStorage());
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -756,19 +695,50 @@ export default function App() {
   const [currentPart, setCurrentPart] = useState<Partial<Part> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(inventory));
-  }, [inventory]);
+  // --- Firestore Real-time Listeners ---
 
+  // 1. Listen for Inventory Changes
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
-  }, [categories]);
+    const unsubscribe = onSnapshot(collection(db, 'parts'), (snapshot) => {
+      const partsData: Part[] = [];
+      snapshot.forEach((doc) => {
+        partsData.push({ id: doc.id, ...doc.data() } as Part);
+      });
+      setInventory(partsData);
+      setIsLoading(false);
+    }, (error) => {
+      console.error("Error fetching parts:", error);
+      setIsLoading(false);
+    });
 
+    return () => unsubscribe();
+  }, []);
+
+  // 2. Listen for Categories Changes
+  useEffect(() => {
+    // We store categories in a dedicated 'settings' collection, document 'general'
+    const unsubscribe = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.categories) {
+          setCategories(data.categories);
+        }
+      } else {
+        // Initialize default categories if not exists
+        setDoc(doc(db, 'settings', 'general'), { categories: DEFAULT_CATEGORIES });
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Save Cart to LocalStorage
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.CART, JSON.stringify(cart));
   }, [cart]);
 
 
+  // --- Derived Data ---
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + (item.price * item.quantity), 0), [cart]);
 
   const availableSubcategories = useMemo(() => {
@@ -811,6 +781,8 @@ export default function App() {
       return inventory.filter(p => p.subcategory === sub && p.category === cat).length;
   };
 
+  // --- Handlers ---
+
   const handleCategoryChange = (cat: string | 'ALL') => {
     setActiveCategory(cat);
     setActiveSubcategory(null);
@@ -821,32 +793,51 @@ export default function App() {
     setViewMode('LIST');
   };
 
-  const handleAddCategory = (newCat: string) => {
-    if (newCat && !categories.includes(newCat)) {
-      setCategories([...categories, newCat]);
+  // Update Category in Firestore
+  const updateCategoriesInDb = async (newCategories: string[]) => {
+    try {
+      await setDoc(doc(db, 'settings', 'general'), { categories: newCategories }, { merge: true });
+    } catch (e) {
+      console.error("Error updating categories:", e);
+      alert("更新分類失敗");
     }
   };
 
-  const handleRenameCategory = (oldName: string, newName: string) => {
-    if (!newName.trim() || categories.includes(newName)) return;
-    setCategories(prev => prev.map(c => c === oldName ? newName : c));
-    setInventory(prev => prev.map(part => {
-      if (part.category === oldName) return { ...part, category: newName };
-      return part;
-    }));
-    if (activeCategory === oldName) setActiveCategory(newName);
-    setCart(prev => prev.map(item => {
-        if (item.category === oldName) return { ...item, category: newName };
-        return item;
-    }));
+  const handleAddCategory = (newCat: string) => {
+    if (newCat && !categories.includes(newCat)) {
+      updateCategoriesInDb([...categories, newCat]);
+    }
   };
 
-  const handleDeleteCategory = (catName: string) => {
+  const handleRenameCategory = async (oldName: string, newName: string) => {
+    if (!newName.trim() || categories.includes(newName)) return;
+    
+    // 1. Update Categories List
+    const newCategories = categories.map(c => c === oldName ? newName : c);
+    await updateCategoriesInDb(newCategories);
+    
+    // 2. Update ALL items in that category (Batch update is better but loop is fine for small scale)
+    const itemsToUpdate = inventory.filter(p => p.category === oldName);
+    itemsToUpdate.forEach(item => {
+        updateDoc(doc(db, 'parts', item.id), { category: newName });
+    });
+
+    if (activeCategory === oldName) setActiveCategory(newName);
+  };
+
+  const handleDeleteCategory = async (catName: string) => {
     const partsCount = getCategoryCount(catName);
     if (window.confirm(`確定要刪除「${catName}」分類嗎？\n將會一併刪除該分類下的 ${partsCount} 個商品。`)) {
-      setCategories(prev => prev.filter(c => c !== catName));
-      setInventory(prev => prev.filter(p => p.category !== catName));
-      setCart(prev => prev.filter(item => item.category !== catName));
+      // 1. Update Categories List
+      const newCategories = categories.filter(c => c !== catName);
+      await updateCategoriesInDb(newCategories);
+
+      // 2. Delete ALL items in that category
+      const itemsToDelete = inventory.filter(p => p.category === catName);
+      itemsToDelete.forEach(item => {
+        deleteDoc(doc(db, 'parts', item.id));
+      });
+
       if (activeCategory === catName) setActiveCategory('ALL');
     }
   };
@@ -855,12 +846,11 @@ export default function App() {
     const targetCategory = currentPart?.category || (activeCategory !== 'ALL' ? activeCategory : null);
     if (!targetCategory) return;
 
-    setInventory(prev => prev.map(part => {
-        if (part.category === targetCategory && part.subcategory === oldName) {
-            return { ...part, subcategory: newName };
-        }
-        return part;
-    }));
+    // Update all parts with this subcategory
+    const itemsToUpdate = inventory.filter(p => p.category === targetCategory && p.subcategory === oldName);
+    itemsToUpdate.forEach(item => {
+        updateDoc(doc(db, 'parts', item.id), { subcategory: newName });
+    });
 
     if (currentPart && currentPart.subcategory === oldName) {
         setCurrentPart(prev => prev ? ({ ...prev, subcategory: newName }) : null);
@@ -869,13 +859,6 @@ export default function App() {
     if (activeSubcategory === oldName && activeCategory === targetCategory) {
         setActiveSubcategory(newName);
     }
-
-    setCart(prev => prev.map(item => {
-        if (item.category === targetCategory && item.subcategory === oldName) {
-            return { ...item, subcategory: newName };
-        }
-        return item;
-    }));
   };
 
   const handleDeleteSubcategory = (subName: string) => {
@@ -885,8 +868,10 @@ export default function App() {
     const count = getSubcategoryCount(subName);
 
     if (window.confirm(`確定要刪除「${targetCategory} > ${subName}」分類嗎？\n將會刪除此分類下的 ${count} 個商品。`)) {
-        setInventory(prev => prev.filter(p => !(p.category === targetCategory && p.subcategory === subName)));
-        setCart(prev => prev.filter(item => !(item.category === targetCategory && item.subcategory === subName)));
+        const itemsToDelete = inventory.filter(p => p.category === targetCategory && p.subcategory === subName);
+        itemsToDelete.forEach(item => {
+            deleteDoc(doc(db, 'parts', item.id));
+        });
         
         if (currentPart && currentPart.subcategory === subName) {
             setCurrentPart(prev => prev ? ({ ...prev, subcategory: '' }) : null);
@@ -913,9 +898,10 @@ export default function App() {
     setIsModalOpen(true);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('確定要刪除這個項目嗎?')) {
-      setInventory(prev => prev.filter(p => p.id !== id));
+      await deleteDoc(doc(db, 'parts', id));
+      // Remove from cart locally
       setCart(prev => prev.filter(item => item.id !== id));
     }
   };
@@ -969,7 +955,8 @@ export default function App() {
     }
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  // --- Firestore Save Logic ---
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentPart) return;
 
@@ -978,19 +965,31 @@ export default function App() {
         return;
     }
 
-    if (currentPart.id) {
-      setInventory(prev => prev.map(p => p.id === currentPart.id ? currentPart as Part : p));
-      setCart(prev => prev.map(item => item.id === currentPart.id ? { ...item, ...currentPart, quantity: item.quantity } as CartItem : item));
-    } else {
-      const newPart: Part = {
-        ...(currentPart as Part),
-        id: Date.now().toString(),
-        subcategory: currentPart.subcategory! 
+    try {
+      const partData = {
+          name: currentPart.name,
+          category: currentPart.category,
+          subcategory: currentPart.subcategory,
+          price: currentPart.price,
+          description: currentPart.description || '',
+          imageUrl: currentPart.imageUrl || '',
+          inStock: currentPart.inStock || false
       };
-      setInventory(prev => [newPart, ...prev]);
+
+      if (currentPart.id) {
+        // Update existing doc
+        await updateDoc(doc(db, 'parts', currentPart.id), partData);
+      } else {
+        // Create new doc
+        await addDoc(collection(db, 'parts'), partData);
+      }
+      
+      setIsModalOpen(false);
+      setCurrentPart(null);
+    } catch (error) {
+      console.error("Error saving part:", error);
+      alert("儲存失敗，請檢查網路連線");
     }
-    setIsModalOpen(false);
-    setCurrentPart(null);
   };
 
   const generateDescription = async () => {
@@ -1006,20 +1005,6 @@ export default function App() {
     );
     setCurrentPart(prev => prev ? ({ ...prev, description: desc }) : null);
     setIsGenerating(false);
-  };
-
-  // --- New Feature: Export Logic ---
-  const handleExport = () => {
-    const dataStr = JSON.stringify(inventory, null, 2);
-    // 加上 export const INITIAL_INVENTORY: Part[] = ... 的前綴，方便您直接覆蓋代碼
-    const exportContent = `const INITIAL_INVENTORY: Part[] = ${dataStr};`;
-    
-    navigator.clipboard.writeText(exportContent).then(() => {
-      alert('已複製所有商品資料！\n\n請切換到 VS Code，貼上並覆蓋掉原本的 INITIAL_INVENTORY 區塊。');
-    }).catch(() => {
-      console.log(exportContent);
-      alert('複製失敗，請打開控制台 (F12) 複製資料。');
-    });
   };
 
   return (
@@ -1090,7 +1075,12 @@ export default function App() {
                 <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
                   GamePart Hub
                 </h1>
-                <p className="text-xs text-slate-400">專業主機維修料件商</p>
+                <p className="text-xs text-slate-400 flex items-center gap-1">
+                    專業主機維修料件商 
+                    <span className="flex items-center gap-0.5 text-emerald-400 bg-emerald-500/10 px-1.5 rounded-full text-[10px] border border-emerald-500/20">
+                        <Cloud className="w-3 h-3" /> 雲端連線中
+                    </span>
+                </p>
               </div>
             </div>
 
@@ -1263,272 +1253,271 @@ export default function App() {
 
       {/* --- Main Content Area --- */}
       <main className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
-        {/* Admin Actions (Modified with Export Button) */}
-        {isAdmin && (
-            <div className="mb-6 bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                   <div className="p-2 bg-amber-500/20 rounded-lg">
-                     <Wrench className="w-5 h-5 text-amber-400" />
-                   </div>
-                   <div>
-                       <h3 className="font-bold text-amber-100">管理員控制台</h3>
-                       <p className="text-xs text-amber-400/70">所有修改請記得按「匯出資料」並貼回 GitHub 存檔</p>
-                   </div>
-                </div>
-                <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-                    {/* NEW Export Button */}
-                    <button
-                        onClick={handleExport}
-                        className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white border border-purple-500/30 rounded-lg transition-all font-medium text-sm shadow-lg shadow-purple-500/20"
-                        title="將目前所有商品資料轉成代碼，以供貼回 VS Code"
-                    >
-                        <Download className="w-4 h-4" />
-                        匯出資料庫 (JSON)
-                    </button>
 
-                    <button
-                        onClick={() => setIsCategoryManagerOpen(true)}
-                        className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-amber-500/30 rounded-lg transition-all font-medium text-sm"
-                    >
-                        <Settings className="w-4 h-4" />
-                        管理分類
-                    </button>
-                    <button
-                        onClick={handleCreate}
-                        className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg shadow-lg shadow-amber-500/20 transition-all font-medium text-sm"
-                    >
-                        <Plus className="w-4 h-4" />
-                        新增零件
-                    </button>
-                </div>
+        {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-20 text-slate-500">
+                <Loader2 className="w-10 h-10 animate-spin text-blue-500 mb-4" />
+                <p>正在從雲端載入庫存資料...</p>
             </div>
-        )}
-
-        {/* --- VIEW MODE: LIST (Price List) --- */}
-        {viewMode === 'LIST' ? (
-            <PriceListView 
-                parts={inventory} 
-                categories={categories}
-                activeCategory={activeCategory}
-                onCategoryChange={handleCategoryChange}
-                onAddToCart={addToCart}
-                isAdmin={isAdmin}
-                onEdit={handleEdit}
-                onAdd={handleCreate} // Pass the create handler
-            />
         ) : (
-            // --- VIEW MODE: GRID (Content Remains Same) ---
-            <>
-                {activeCategory === 'ALL' && !searchQuery && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                        {categories.map(cat => (
-                            <div 
-                                key={cat}
-                                onClick={() => handleCategoryChange(cat)}
-                                className="group cursor-pointer bg-slate-800 hover:bg-slate-700 rounded-2xl p-6 border border-slate-700 hover:border-blue-500/50 transition-all hover:shadow-2xl hover:shadow-blue-500/10"
-                            >
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className={`p-3 rounded-xl ${getCategoryColor(cat)}`}>
-                                        <Gamepad2 className="w-8 h-8" />
-                                    </div>
-                                    <ChevronRight className="w-5 h-5 text-slate-600 group-hover:text-blue-400 transition-colors" />
-                                </div>
-                                <h3 className="text-2xl font-bold text-slate-100 group-hover:text-blue-400 transition-colors">{cat}</h3>
-                                <p className="text-slate-400 text-sm mt-2">
-                                    {inventory.filter(i => i.category === cat).length} 個零件在庫
-                                </p>
-                            </div>
-                        ))}
+        <>
+            {/* Admin Actions */}
+            {isAdmin && (
+                <div className="mb-6 bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                    <div className="p-2 bg-amber-500/20 rounded-lg">
+                        <Wrench className="w-5 h-5 text-amber-400" />
                     </div>
-                )}
-
-                {activeCategory !== 'ALL' && !activeSubcategory && !searchQuery && (
                     <div>
-                        <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                            <FolderOpen className="w-6 h-6 text-blue-400" />
-                            選擇 {activeCategory} 零件分類
-                        </h2>
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                            {availableSubcategories.length > 0 ? availableSubcategories.map(subcat => (
-                                <div 
-                                    key={subcat}
-                                    onClick={() => setActiveSubcategory(subcat)}
-                                    className="relative bg-slate-800/50 hover:bg-slate-700 cursor-pointer p-4 rounded-xl border border-slate-700 hover:border-blue-400 transition-all flex flex-col items-center text-center gap-3 group"
-                                >
-                                    {isAdmin && (
-                                        <div className="absolute top-2 right-2 flex gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-                                             <button 
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setRenameTarget(subcat);
-                                                }}
-                                                className="p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded shadow-lg transition-colors"
-                                                title="更名"
-                                             >
-                                                <Edit3 className="w-3 h-3" />
-                                             </button>
-                                             <button 
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleDeleteSubcategory(subcat);
-                                                }}
-                                                 className="p-1.5 bg-red-600 hover:bg-red-500 text-white rounded shadow-lg transition-colors"
-                                                 title="刪除"
-                                             >
-                                                <Trash2 className="w-3 h-3" />
-                                             </button>
-                                        </div>
-                                    )}
-
-                                    <div className="w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center group-hover:scale-110 transition-transform">
-                                        <Package className="w-6 h-6 text-slate-400 group-hover:text-blue-400" />
-                                    </div>
-                                    <div>
-                                        <h3 className="font-bold text-slate-200 group-hover:text-white">{subcat}</h3>
-                                        <p className="text-xs text-slate-500 mt-1">
-                                            {inventory.filter(i => i.category === activeCategory && i.subcategory === subcat).length} 個項目
-                                        </p>
-                                    </div>
-                                </div>
-                            )) : (
-                                <div className="col-span-full py-10 text-center text-slate-500 bg-slate-800/30 rounded-xl border border-slate-800 border-dashed">
-                                    此主機分類下目前沒有零件。
-                                    {isAdmin && <p className="mt-2 text-amber-400 cursor-pointer hover:underline" onClick={handleCreate}>點擊新增第一個零件</p>}
-                                </div>
-                            )}
-                            
-                            {isAdmin && (
-                                <div 
-                                    onClick={handleCreate}
-                                    className="bg-slate-800/30 hover:bg-slate-800 cursor-pointer p-4 rounded-xl border border-dashed border-slate-600 hover:border-emerald-500 transition-all flex flex-col items-center justify-center text-center gap-2 group h-full min-h-[140px]"
-                                >
-                                    <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                                        <Plus className="w-5 h-5 text-emerald-500" />
-                                    </div>
-                                    <span className="text-sm font-medium text-emerald-500">新增零件</span>
-                                </div>
-                            )}
-                        </div>
+                        <h3 className="font-bold text-amber-100">管理員控制台 (已連線雲端)</h3>
+                        <p className="text-xs text-amber-400/70">您現在的所有修改都會即時同步到 Google Firebase</p>
                     </div>
-                )}
+                    </div>
+                    <div className="flex gap-2 w-full sm:w-auto">
+                        <button
+                            onClick={() => setIsCategoryManagerOpen(true)}
+                            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-amber-500/30 rounded-lg transition-all font-medium text-sm"
+                        >
+                            <Settings className="w-4 h-4" />
+                            管理分類
+                        </button>
+                        <button
+                            onClick={handleCreate}
+                            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg shadow-lg shadow-amber-500/20 transition-all font-medium text-sm"
+                        >
+                            <Plus className="w-4 h-4" />
+                            新增零件
+                        </button>
+                    </div>
+                </div>
+            )}
 
-                {(activeSubcategory || searchQuery) && (
-                    <div className="animate-fadeIn">
-                        {!searchQuery && (
-                            <div className="flex items-center gap-4 mb-6">
-                                <button 
-                                    onClick={() => setActiveSubcategory(null)}
-                                    className="p-2 hover:bg-slate-800 rounded-full transition-colors"
-                                    title="返回分類"
-                                >
-                                    <ArrowLeft className="w-5 h-5 text-slate-400" />
-                                </button>
-                                <h2 className="text-2xl font-bold text-white">
-                                    {activeSubcategory}
-                                    <span className="ml-3 text-sm font-normal text-slate-500 bg-slate-800 px-3 py-1 rounded-full">
-                                        {displayedParts.length} 個商品
-                                    </span>
-                                </h2>
-                            </div>
-                        )}
-
-                        {displayedParts.length === 0 ? (
-                            <div className="text-center py-20 bg-slate-800/30 rounded-3xl border border-slate-800 border-dashed">
-                                <Gamepad2 className="w-16 h-16 text-slate-600 mx-auto mb-4" />
-                                <h3 className="text-xl font-medium text-slate-300">沒有找到零件</h3>
-                                <p className="text-slate-500 mt-2">嘗試搜尋其他關鍵字或返回上頁</p>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                                {displayedParts.map((part) => (
+            {/* --- VIEW MODE: LIST (Price List) --- */}
+            {viewMode === 'LIST' ? (
+                <PriceListView 
+                    parts={inventory} 
+                    categories={categories}
+                    activeCategory={activeCategory}
+                    onCategoryChange={handleCategoryChange}
+                    onAddToCart={addToCart}
+                    isAdmin={isAdmin}
+                    onEdit={handleEdit}
+                    onAdd={handleCreate}
+                />
+            ) : (
+                // --- VIEW MODE: GRID ---
+                <>
+                    {activeCategory === 'ALL' && !searchQuery && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                            {categories.map(cat => (
                                 <div 
-                                    key={part.id} 
-                                    className="group relative bg-slate-800/50 rounded-xl overflow-hidden border border-slate-700/50 hover:border-slate-600 hover:shadow-2xl hover:shadow-blue-900/10 transition-all duration-300 flex flex-col h-full"
+                                    key={cat}
+                                    onClick={() => handleCategoryChange(cat)}
+                                    className="group cursor-pointer bg-slate-800 hover:bg-slate-700 rounded-2xl p-6 border border-slate-700 hover:border-blue-500/50 transition-all hover:shadow-2xl hover:shadow-blue-500/10"
                                 >
-                                    <div className="relative aspect-square overflow-hidden bg-slate-900">
-                                        <img
-                                            src={part.imageUrl}
-                                            alt={part.name}
-                                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                                        />
-                                        <div className="absolute top-2 left-2 flex gap-2">
-                                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border backdrop-blur-md ${getCategoryColor(part.category)}`}>
-                                            {part.category}
-                                            </span>
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className={`p-3 rounded-xl ${getCategoryColor(cat)}`}>
+                                            <Gamepad2 className="w-8 h-8" />
                                         </div>
+                                        <ChevronRight className="w-5 h-5 text-slate-600 group-hover:text-blue-400 transition-colors" />
+                                    </div>
+                                    <h3 className="text-2xl font-bold text-slate-100 group-hover:text-blue-400 transition-colors">{cat}</h3>
+                                    <p className="text-slate-400 text-sm mt-2">
+                                        {inventory.filter(i => i.category === cat).length} 個零件在庫
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
 
+                    {activeCategory !== 'ALL' && !activeSubcategory && !searchQuery && (
+                        <div>
+                            <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                                <FolderOpen className="w-6 h-6 text-blue-400" />
+                                選擇 {activeCategory} 零件分類
+                            </h2>
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                                {availableSubcategories.length > 0 ? availableSubcategories.map(subcat => (
+                                    <div 
+                                        key={subcat}
+                                        onClick={() => setActiveSubcategory(subcat)}
+                                        className="relative bg-slate-800/50 hover:bg-slate-700 cursor-pointer p-4 rounded-xl border border-slate-700 hover:border-blue-400 transition-all flex flex-col items-center text-center gap-3 group"
+                                    >
                                         {isAdmin && (
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); handleEdit(part); }}
-                                                className="absolute top-2 right-2 p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded shadow-lg z-10 transition-colors"
-                                                title="快速編輯"
-                                            >
-                                                <Edit3 className="w-3 h-3" />
-                                            </button>
-                                        )}
-
-                                        {!part.inStock && (
-                                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-[2px]">
-                                            <span className="px-3 py-1 bg-red-500/90 text-white text-xs font-bold rounded shadow-xl">
-                                                缺貨中
-                                            </span>
-                                            </div>
-                                        )}
-                                        
-                                        {isAdmin && (
-                                            <div className="absolute bottom-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); handleDelete(part.id); }}
-                                                    className="p-2 bg-red-500/80 hover:bg-red-500 text-white rounded-lg shadow-lg"
-                                                    title="刪除商品"
+                                            <div className="absolute top-2 right-2 flex gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button 
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setRenameTarget(subcat);
+                                                    }}
+                                                    className="p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded shadow-lg transition-colors"
+                                                    title="更名"
                                                 >
-                                                    <Trash2 className="w-4 h-4" />
+                                                    <Edit3 className="w-3 h-3" />
+                                                </button>
+                                                <button 
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleDeleteSubcategory(subcat);
+                                                    }}
+                                                    className="p-1.5 bg-red-600 hover:bg-red-500 text-white rounded shadow-lg transition-colors"
+                                                    title="刪除"
+                                                >
+                                                    <Trash2 className="w-3 h-3" />
                                                 </button>
                                             </div>
                                         )}
-                                    </div>
 
-                                    <div className="p-3 flex flex-col flex-grow">
-                                        <div className="flex-grow">
-                                            <div className="text-[10px] text-blue-400 mb-1 font-medium truncate">
-                                                {part.subcategory}
-                                            </div>
-                                            <h3 className="text-sm font-bold text-slate-100 mb-1 leading-snug group-hover:text-blue-400 transition-colors line-clamp-2">
-                                            {part.name}
-                                            </h3>
+                                        <div className="w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                            <Package className="w-6 h-6 text-slate-400 group-hover:text-blue-400" />
                                         </div>
-                                    
-                                        <div className="mt-2 pt-2 border-t border-slate-700/50 flex items-center justify-between">
-                                            <span className="text-lg font-bold text-emerald-400 tracking-tight">
-                                                {formatCurrency(part.price)}
-                                            </span>
-                                            
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); addToCart(part); }}
-                                                disabled={!part.inStock}
-                                                className={`p-1.5 rounded-lg transition-colors flex items-center justify-center ${
-                                                    part.inStock 
-                                                    ? 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-lg shadow-emerald-500/20' 
-                                                    : 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                                                }`}
-                                                title={part.inStock ? "加入購物車" : "缺貨中"}
-                                            >
-                                                {part.inStock ? <ShoppingCart className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                                            </button>
+                                        <div>
+                                            <h3 className="font-bold text-slate-200 group-hover:text-white">{subcat}</h3>
+                                            <p className="text-xs text-slate-500 mt-1">
+                                                {inventory.filter(i => i.category === activeCategory && i.subcategory === subcat).length} 個項目
+                                            </p>
                                         </div>
                                     </div>
-                                </div>
-                                ))}
+                                )) : (
+                                    <div className="col-span-full py-10 text-center text-slate-500 bg-slate-800/30 rounded-xl border border-slate-800 border-dashed">
+                                        此主機分類下目前沒有零件。
+                                        {isAdmin && <p className="mt-2 text-amber-400 cursor-pointer hover:underline" onClick={handleCreate}>點擊新增第一個零件</p>}
+                                    </div>
+                                )}
+                                
+                                {isAdmin && (
+                                    <div 
+                                        onClick={handleCreate}
+                                        className="bg-slate-800/30 hover:bg-slate-800 cursor-pointer p-4 rounded-xl border border-dashed border-slate-600 hover:border-emerald-500 transition-all flex flex-col items-center justify-center text-center gap-2 group h-full min-h-[140px]"
+                                    >
+                                        <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                                            <Plus className="w-5 h-5 text-emerald-500" />
+                                        </div>
+                                        <span className="text-sm font-medium text-emerald-500">新增零件</span>
+                                    </div>
+                                )}
                             </div>
-                        )}
-                    </div>
-                )}
-            </>
+                        </div>
+                    )}
+
+                    {(activeSubcategory || searchQuery) && (
+                        <div className="animate-fadeIn">
+                            {!searchQuery && (
+                                <div className="flex items-center gap-4 mb-6">
+                                    <button 
+                                        onClick={() => setActiveSubcategory(null)}
+                                        className="p-2 hover:bg-slate-800 rounded-full transition-colors"
+                                        title="返回分類"
+                                    >
+                                        <ArrowLeft className="w-5 h-5 text-slate-400" />
+                                    </button>
+                                    <h2 className="text-2xl font-bold text-white">
+                                        {activeSubcategory}
+                                        <span className="ml-3 text-sm font-normal text-slate-500 bg-slate-800 px-3 py-1 rounded-full">
+                                            {displayedParts.length} 個商品
+                                        </span>
+                                    </h2>
+                                </div>
+                            )}
+
+                            {displayedParts.length === 0 ? (
+                                <div className="text-center py-20 bg-slate-800/30 rounded-3xl border border-slate-800 border-dashed">
+                                    <Gamepad2 className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+                                    <h3 className="text-xl font-medium text-slate-300">沒有找到零件</h3>
+                                    <p className="text-slate-500 mt-2">嘗試搜尋其他關鍵字或返回上頁</p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                                    {displayedParts.map((part) => (
+                                    <div 
+                                        key={part.id} 
+                                        className="group relative bg-slate-800/50 rounded-xl overflow-hidden border border-slate-700/50 hover:border-slate-600 hover:shadow-2xl hover:shadow-blue-900/10 transition-all duration-300 flex flex-col h-full"
+                                    >
+                                        <div className="relative aspect-square overflow-hidden bg-slate-900">
+                                            <img
+                                                src={part.imageUrl}
+                                                alt={part.name}
+                                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                                            />
+                                            <div className="absolute top-2 left-2 flex gap-2">
+                                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border backdrop-blur-md ${getCategoryColor(part.category)}`}>
+                                                {part.category}
+                                                </span>
+                                            </div>
+
+                                            {isAdmin && (
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleEdit(part); }}
+                                                    className="absolute top-2 right-2 p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded shadow-lg z-10 transition-colors"
+                                                    title="快速編輯"
+                                                >
+                                                    <Edit3 className="w-3 h-3" />
+                                                </button>
+                                            )}
+
+                                            {!part.inStock && (
+                                                <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-[2px]">
+                                                <span className="px-3 py-1 bg-red-500/90 text-white text-xs font-bold rounded shadow-xl">
+                                                    缺貨中
+                                                </span>
+                                                </div>
+                                            )}
+                                            
+                                            {isAdmin && (
+                                                <div className="absolute bottom-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleDelete(part.id); }}
+                                                        className="p-2 bg-red-500/80 hover:bg-red-500 text-white rounded-lg shadow-lg"
+                                                        title="刪除商品"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="p-3 flex flex-col flex-grow">
+                                            <div className="flex-grow">
+                                                <div className="text-[10px] text-blue-400 mb-1 font-medium truncate">
+                                                    {part.subcategory}
+                                                </div>
+                                                <h3 className="text-sm font-bold text-slate-100 mb-1 leading-snug group-hover:text-blue-400 transition-colors line-clamp-2">
+                                                {part.name}
+                                                </h3>
+                                            </div>
+                                        
+                                            <div className="mt-2 pt-2 border-t border-slate-700/50 flex items-center justify-between">
+                                                <span className="text-lg font-bold text-emerald-400 tracking-tight">
+                                                    {formatCurrency(part.price)}
+                                                </span>
+                                                
+                                                <button 
+                                                    onClick={(e) => { e.stopPropagation(); addToCart(part); }}
+                                                    disabled={!part.inStock}
+                                                    className={`p-1.5 rounded-lg transition-colors flex items-center justify-center ${
+                                                        part.inStock 
+                                                        ? 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-lg shadow-emerald-500/20' 
+                                                        : 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                                                    }`}
+                                                    title={part.inStock ? "加入購物車" : "缺貨中"}
+                                                >
+                                                    {part.inStock ? <ShoppingCart className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </>
+            )}
+        </>
         )}
       </main>
 
-      {/* --- Edit/Create Modal (Keep original content) --- */}
+      {/* --- Edit/Create Modal --- */}
       {isModalOpen && currentPart && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="bg-[#1e293b] rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-700 animate-fadeIn flex flex-col">
@@ -1743,6 +1732,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Footer */}
       <footer className="border-t border-slate-800 bg-[#0f172a] py-8 mt-auto">
         <div className="max-w-7xl mx-auto px-6 text-center text-slate-500 text-sm">
           <p>© 2024 GamePart Hub. All rights reserved.</p>
