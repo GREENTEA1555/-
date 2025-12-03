@@ -32,13 +32,13 @@ import { generatePartDescription } from './services/geminiService';
 // --- Mock Data ---
 const INITIAL_INVENTORY: Part[] = [
   {
-    id: '1',
-    name: 'PS5 原廠霍爾效應搖桿',
+    id: 'new-part-001',  // ID 不能重複，可以用英文或數字
+    name: 'PS5 光碟機排線',
     category: 'PS5',
-    subcategory: '類比搖桿',
-    price: 450,
-    description: '最新版抗飄移霍爾感應器，適用於 DualSense 手把維修。',
-    imageUrl: 'https://images.unsplash.com/photo-1606144042614-b2417e99c4e3?auto=format&fit=crop&q=80&w=600',
+    subcategory: '排線/連接線',
+    price: 250,
+    description: '原廠拆機排線，解決光碟機讀取錯誤或無反應的問題。',
+    imageUrl: 'https://您的圖片連結.jpg', // 如果沒有圖片，先填空字串 '' 或暫時用現有的圖
     inStock: true
   },
   {
@@ -112,8 +112,8 @@ const getCategoryColor = (category: string) => {
 
 // --- Storage Helpers ---
 const STORAGE_KEYS = {
-  INVENTORY: 'gamepart_inventory_v1',
-  CATEGORIES: 'gamepart_categories_v1',
+  INVENTORY: 'gamepart_inventory_v2',
+  CATEGORIES: 'gamepart_categories_v2',
   CART: 'gamepart_cart_v1'
 };
 
