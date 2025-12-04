@@ -26,12 +26,18 @@ import {
   AlertCircle,
   Cloud,
   Loader2,
-  ShieldAlert
+  ShieldAlert,
+  Lock,
+  LogOut,
+  User,
+  LogIn,
+  UserPlus,
+  History
 } from 'lucide-react';
 import { Part, DEFAULT_CATEGORIES, CartItem } from './types';
 import { generatePartDescription } from './services/geminiService';
 // 引入我們剛剛建立的連線設定
-import { db } from './firebaseConfig';
+import { db, auth } from './firebaseConfig';
 import { 
   collection, 
   onSnapshot, 
@@ -39,8 +45,16 @@ import {
   updateDoc, 
   deleteDoc, 
   doc, 
-  setDoc
+  setDoc,
+  serverTimestamp
 } from 'firebase/firestore';
+import { 
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut,
+  User as FirebaseUser
+} from 'firebase/auth';
 
 // --- Helpers ---
 const formatCurrency = (amount: number) => {
@@ -127,6 +141,239 @@ service cloud.firestore {
         >
           我已經修改規則了，重新整理
         </button>
+      </div>
+    </div>
+  );
+};
+
+// --- User Auth Modal (For Customers) ---
+const UserAuthModal = ({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+}) => {
+  const [isRegister, setIsRegister] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setEmail('');
+      setPassword('');
+      setError('');
+      setLoading(false);
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      if (isRegister) {
+        await createUserWithEmailAndPassword(auth, email, password);
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+      onClose();
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === 'auth/email-already-in-use') {
+        setError('此 Email 已經註冊過了');
+      } else if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+        setError('帳號或密碼錯誤');
+      } else if (err.code === 'auth/weak-password') {
+        setError('密碼長度不足 (至少6位)');
+      } else {
+        setError('發生錯誤，請稍後再試');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+      <div className="bg-[#1e293b] rounded-2xl w-full max-w-sm p-8 border border-slate-700 shadow-2xl relative">
+        <button 
+          onClick={onClose}
+          className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        <div className="flex flex-col items-center mb-6">
+          <div className="w-16 h-16 bg-purple-600/20 rounded-full flex items-center justify-center mb-4 border border-purple-500/30">
+            {isRegister ? <UserPlus className="w-8 h-8 text-purple-400" /> : <LogIn className="w-8 h-8 text-purple-400" />}
+          </div>
+          <h2 className="text-2xl font-bold text-white">{isRegister ? '註冊會員' : '會員登入'}</h2>
+          <p className="text-slate-400 text-sm mt-1">{isRegister ? '建立您的帳戶以追蹤訂單' : '歡迎回來 GamePart Hub'}</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-500 uppercase">Email</label>
+            <div className="relative">
+              <User className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+              <input
+                type="email"
+                required
+                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all"
+                placeholder="name@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-500 uppercase">密碼</label>
+            <div className="relative">
+              <Lock className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+              <input
+                type="password"
+                required
+                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all"
+                placeholder="輸入密碼"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 p-2 rounded-lg border border-red-500/20">
+              <AlertCircle className="w-4 h-4" />
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg shadow-lg shadow-purple-500/20 transition-all active:scale-[0.98] mt-2 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center"
+          >
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (isRegister ? '立即註冊' : '登入')}
+          </button>
+        </form>
+
+        <div className="mt-6 text-center">
+          <button 
+            onClick={() => setIsRegister(!isRegister)}
+            className="text-slate-400 hover:text-white text-sm hover:underline transition-colors"
+          >
+            {isRegister ? '已經有帳號？點此登入' : '還沒有帳號？點此註冊'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Admin Login Modal ---
+const LoginModal = ({ 
+  isOpen, 
+  onClose, 
+  onLogin 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  onLogin: () => void; 
+}) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  // 重置狀態
+  useEffect(() => {
+    if (isOpen) {
+      setUsername('');
+      setPassword('');
+      setError('');
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    // 硬編碼的帳號密碼
+    if (username === 'admin' && password === '8888') {
+      onLogin();
+      onClose();
+    } else {
+      setError('帳號或密碼錯誤');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+      <div className="bg-[#1e293b] rounded-2xl w-full max-w-sm p-8 border border-slate-700 shadow-2xl relative">
+        <button 
+          onClick={onClose}
+          className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        <div className="flex flex-col items-center mb-6">
+          <div className="w-16 h-16 bg-blue-600/20 rounded-full flex items-center justify-center mb-4 border border-blue-500/30">
+            <Lock className="w-8 h-8 text-blue-400" />
+          </div>
+          <h2 className="text-2xl font-bold text-white">後台登入</h2>
+          <p className="text-slate-400 text-sm mt-1">請輸入管理員憑證</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-500 uppercase">帳號</label>
+            <div className="relative">
+              <User className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+              <input
+                type="text"
+                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                placeholder="輸入帳號"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-500 uppercase">密碼</label>
+            <div className="relative">
+              <Lock className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+              <input
+                type="password"
+                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                placeholder="輸入密碼"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 text-red-400 text-sm bg-red-500/10 p-2 rounded-lg border border-red-500/20">
+              <AlertCircle className="w-4 h-4" />
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow-lg shadow-blue-500/20 transition-all active:scale-[0.98] mt-2"
+          >
+            登入系統
+          </button>
+        </form>
       </div>
     </div>
   );
@@ -667,12 +914,14 @@ const CheckoutModal = ({
     isOpen,
     onClose,
     onConfirm,
-    totalAmount
+    totalAmount,
+    isProcessing
 }: {
     isOpen: boolean;
     onClose: () => void;
     onConfirm: () => void;
     totalAmount: number;
+    isProcessing: boolean;
 }) => {
     if (!isOpen) return null;
 
@@ -684,7 +933,7 @@ const CheckoutModal = ({
                         <CreditCard className="w-8 h-8 text-blue-400" />
                     </div>
                     <h2 className="text-2xl font-bold text-white">確認結帳</h2>
-                    <p className="text-slate-400 mt-2">這是一個模擬結帳流程。</p>
+                    <p className="text-slate-400 mt-2">將會建立訂單並通知管理員。</p>
                 </div>
                 
                 <div className="bg-slate-800/50 rounded-xl p-4 mb-6 border border-slate-700">
@@ -705,15 +954,22 @@ const CheckoutModal = ({
                 <div className="flex gap-3">
                     <button 
                         onClick={onClose}
-                        className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-colors"
+                        disabled={isProcessing}
+                        className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-colors disabled:opacity-50"
                     >
                         取消
                     </button>
                     <button 
                         onClick={onConfirm}
-                        className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-lg shadow-emerald-500/25 transition-all"
+                        disabled={isProcessing}
+                        className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-lg shadow-emerald-500/25 transition-all flex justify-center items-center gap-2"
                     >
-                        確認付款
+                        {isProcessing ? (
+                            <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                處理中...
+                            </>
+                        ) : '確認付款'}
                     </button>
                 </div>
             </div>
@@ -733,6 +989,8 @@ export default function App() {
   const [cart, setCart] = useState<CartItem[]>(() => loadCartFromStorage());
 
   const [isAdmin, setIsAdmin] = useState(false);
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+
   const [searchQuery, setSearchQuery] = useState('');
   
   const [activeCategory, setActiveCategory] = useState<string | 'ALL'>('ALL');
@@ -747,14 +1005,29 @@ export default function App() {
   const [isSubcategoryManagerOpen, setIsSubcategoryManagerOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   
+  // Login Modal States
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false); // Admin
+  const [isUserAuthOpen, setIsUserAuthOpen] = useState(false); // Customer
+  
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentPart, setCurrentPart] = useState<Partial<Part> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Error State for Firebase Permissions
   const [permissionError, setPermissionError] = useState(false);
+  
+  // Checkout Processing
+  const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
 
   // --- Firestore Real-time Listeners ---
+
+  // 0. Listen for Auth Changes
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
 
   // 1. Listen for Inventory Changes
   useEffect(() => {
@@ -851,6 +1124,31 @@ export default function App() {
   };
 
   // --- Handlers ---
+
+  const handleAdminToggle = () => {
+    if (isAdmin) {
+      // Logout
+      setIsAdmin(false);
+    } else {
+      // Open Login Modal
+      setIsLoginModalOpen(true);
+    }
+  };
+  
+  const handleUserAuthToggle = () => {
+    if (currentUser) {
+        if(window.confirm('確定要登出會員嗎？')) {
+            signOut(auth);
+        }
+    } else {
+        setIsUserAuthOpen(true);
+    }
+  };
+
+  const handleLoginSuccess = () => {
+    setIsAdmin(true);
+    setIsLoginModalOpen(false);
+  };
 
   const handleCategoryChange = (cat: string | 'ALL') => {
     setActiveCategory(cat);
@@ -1004,12 +1302,29 @@ export default function App() {
     setIsCheckoutOpen(true);
   };
 
-  const confirmCheckout = () => {
-    setTimeout(() => {
-        alert("訂單已送出！感謝您的購買。");
+  const confirmCheckout = async () => {
+    setIsProcessingCheckout(true);
+    try {
+        const orderData = {
+            userId: currentUser ? currentUser.uid : 'guest',
+            userEmail: currentUser ? currentUser.email : 'guest',
+            items: cart,
+            totalAmount: cartTotal,
+            status: 'pending',
+            createdAt: serverTimestamp(),
+        };
+
+        await addDoc(collection(db, 'orders'), orderData);
+        
+        alert("訂單已送出！管理員將會盡快處理。");
         setCart([]);
         setIsCheckoutOpen(false);
-    }, 500);
+    } catch (error) {
+        console.error("Checkout failed:", error);
+        alert("訂單建立失敗，請檢查網路連線。");
+    } finally {
+        setIsProcessingCheckout(false);
+    }
   };
 
 
@@ -1081,6 +1396,17 @@ export default function App() {
       
       <PermissionErrorModal isOpen={permissionError} />
 
+      <LoginModal 
+        isOpen={isLoginModalOpen} 
+        onClose={() => setIsLoginModalOpen(false)} 
+        onLogin={handleLoginSuccess}
+      />
+      
+      <UserAuthModal
+        isOpen={isUserAuthOpen}
+        onClose={() => setIsUserAuthOpen(false)}
+      />
+
       <CartDrawer 
         isOpen={isCartOpen} 
         onClose={() => setIsCartOpen(false)}
@@ -1095,6 +1421,7 @@ export default function App() {
         onClose={() => setIsCheckoutOpen(false)}
         onConfirm={confirmCheckout}
         totalAmount={cartTotal}
+        isProcessing={isProcessingCheckout}
       />
 
       <CategoryManager 
@@ -1201,7 +1528,7 @@ export default function App() {
             <div className="flex items-center gap-3 shrink-0">
                <button 
                   onClick={() => setIsCartOpen(true)}
-                  className="relative p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors border border-slate-700 mr-2"
+                  className="relative p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors border border-slate-700 mr-1"
                >
                   <ShoppingCart className="w-5 h-5" />
                   {cart.length > 0 && (
@@ -1210,17 +1537,33 @@ export default function App() {
                      </span>
                   )}
                </button>
+               
+              {/* Member Auth Button */}
+              <button
+                onClick={handleUserAuthToggle}
+                className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all mr-1 ${
+                  currentUser
+                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50'
+                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700 border border-slate-700'
+                }`}
+                title={currentUser ? `已登入: ${currentUser.email}` : "會員登入/註冊"}
+              >
+                {currentUser ? <User className="w-4 h-4" /> : <LogIn className="w-4 h-4" />}
+                <span className="hidden sm:inline">
+                    {currentUser ? '會員專區' : '會員登入'}
+                </span>
+              </button>
 
               <button
-                onClick={() => setIsAdmin(!isAdmin)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                onClick={handleAdminToggle}
+                className={`flex items-center gap-2 px-3 py-2 rounded-full text-sm font-medium transition-all ${
                   isAdmin 
                     ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50' 
                     : 'bg-slate-800 text-slate-400 hover:bg-slate-700 border border-slate-700'
                 }`}
+                title="網站管理員後台"
               >
-                {isAdmin ? <Settings className="w-4 h-4 animate-spin-slow" /> : <ShoppingBag className="w-4 h-4" />}
-                <span className="hidden sm:inline">{isAdmin ? '後台模式' : '訪客'}</span>
+                {isAdmin ? <LogOut className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
               </button>
             </div>
           </div>
@@ -1359,6 +1702,19 @@ export default function App() {
                             <Plus className="w-4 h-4" />
                             新增零件
                         </button>
+                    </div>
+                </div>
+            )}
+            
+            {/* User Logged In Info */}
+            {currentUser && !isAdmin && (
+                <div className="mb-6 bg-purple-500/10 border border-purple-500/20 p-4 rounded-xl flex items-center gap-3 animate-fadeIn">
+                    <div className="p-2 bg-purple-500/20 rounded-full">
+                        <User className="w-5 h-5 text-purple-400" />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-purple-100">歡迎回來, {currentUser.email}</h3>
+                        <p className="text-xs text-purple-400/70">您提交的訂單將會自動記錄到您的帳戶中。</p>
                     </div>
                 </div>
             )}

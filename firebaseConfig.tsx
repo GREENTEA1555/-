@@ -1,8 +1,8 @@
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
+// firebaseConfig.tsx
+import { initializeApp, getApps, getApp } from "firebase/app"; //
 import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
-// Your web app's Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyAFQlRKhhlrUyjoV61tQhypwBWnq7XZywU",
   authDomain: "engineers246.firebaseapp.com",
@@ -13,14 +13,9 @@ const firebaseConfig = {
   measurementId: "G-QYGL0N16Q8"
 };
 
-// Initialize Firebase
-// 加入防止重複初始化的檢查
-let app;
-try {
-  app = initializeApp(firebaseConfig);
-} catch (e) {
-  // 如果已經初始化過，就忽略錯誤
-}
+// 修正：先檢查是否已經有 App 存在，有就拿舊的，沒有才建立新的
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
 
-export { db };
+export { db, auth };
